@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Local data and generated reports
+data/
+*.db
+*.db-wal
+*.db-shm
+*.xlsx
+
+# Temporary files
+*.tmp
