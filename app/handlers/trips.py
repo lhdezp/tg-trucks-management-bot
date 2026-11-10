@@ -668,7 +668,7 @@ async def cb_trip_view(callback: CallbackQuery, state: FSMContext) -> None:
     if callback.message is None or callback.data is None:
         return
     payload = TripCB.unpack(callback.data)
-    await _show_trip_detail(callback.message, state, payload.trip_id)
+    await _show_trip_detail(callback.message, payload.trip_id)
 
 
 @router.callback_query(TripCB.filter(F.action == "finish"))
@@ -683,7 +683,7 @@ async def cb_trip_finish(callback: CallbackQuery, state: FSMContext) -> None:
         if trip is not None:
             trip.status = TripStatus.finished
             db.flush()
-    await _show_trip_detail(callback.message, state, payload.trip_id)
+    await _show_trip_detail(callback.message, payload.trip_id)
 
 
 @router.callback_query(TripCB.filter(F.action == "reopen"))
@@ -698,7 +698,7 @@ async def cb_trip_reopen(callback: CallbackQuery, state: FSMContext) -> None:
         if trip is not None:
             trip.status = TripStatus.in_progress
             db.flush()
-    await _show_trip_detail(callback.message, state, payload.trip_id)
+    await _show_trip_detail(callback.message, payload.trip_id)
 
 
 @router.callback_query(TripCB.filter(F.action == "delete"))
@@ -779,7 +779,7 @@ async def cb_trip_back(callback: CallbackQuery, state: FSMContext) -> None:
     if current == TripEdit.menu.state:
         data = await state.get_data()
         await _show_trip_detail(
-            callback.message, state, int(data.get("edit_trip_id") or 0)
+            callback.message, int(data.get("edit_trip_id") or 0)
         )
         return
     await state.clear()
@@ -811,19 +811,21 @@ async def cb_create_truck_back(
 async def cb_create_truck_set(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
     if callback.message is None or callback.data is None:
+        await callback.answer()
         return
     payload = TripCB.unpack(callback.data)
     try:
         truck_id = int(payload.value)
     except ValueError:
+        await callback.answer()
         return
     with session_scope() as db:
         truck = get_truck(db, truck_id)
     if truck is None or not truck.active:
         await callback.answer("El camión no está disponible.", show_alert=True)
         return
+    await callback.answer()
     await state.update_data(truck_id=truck.id, truck_name=truck.name)
     await _show_driver_selection(callback.message, state, 0)
 
@@ -843,19 +845,23 @@ async def cb_create_driver_page(
 async def cb_create_driver_set(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
-    await callback.answer()
     if callback.message is None or callback.data is None:
+        await callback.answer()
         return
     payload = TripCB.unpack(callback.data)
     try:
         driver_id = int(payload.value)
     except ValueError:
+        await callback.answer()
         return
     with session_scope() as db:
         driver = get_driver(db, driver_id)
     if driver is None or not driver.active:
-        await callback.answer("El conductor no está disponible.", show_alert=True)
+        await callback.answer(
+            "El conductor no está disponible.", show_alert=True
+        )
         return
+    await callback.answer()
     await state.update_data(driver_id=driver.id, driver_name=driver.name)
     await _ask_create_field(callback.message, state, "origin")
 
@@ -1039,9 +1045,9 @@ async def cb_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
     trip_id = int(data.get("edit_trip_id") or 0)
     field = payload.value
     if field == "truck":
-        await _show_edit_truck_selection(callback.message, state, trip_id, 0)
+        await _show_edit_truck_selection(callback.message, state, 0)
     elif field == "driver":
-        await _show_edit_driver_selection(callback.message, state, trip_id, 0)
+        await _show_edit_driver_selection(callback.message, state, 0)
     elif field == "date":
         await state.set_state(TripEdit.menu)
         await set_ui_message(
@@ -1082,9 +1088,7 @@ async def cb_edit_truck_page(
         return
     payload = TripCB.unpack(callback.data)
     data = await state.get_data()
-    await _show_edit_truck_selection(
-        callback.message, state, int(data.get("edit_trip_id") or 0), payload.page
-    )
+    await _show_edit_truck_selection(callback.message, state, payload.page)
 
 
 @router.callback_query(TripCB.filter(F.action == "edit_truck_set"))
@@ -1120,9 +1124,7 @@ async def cb_edit_driver_page(
         return
     payload = TripCB.unpack(callback.data)
     data = await state.get_data()
-    await _show_edit_driver_selection(
-        callback.message, state, int(data.get("edit_trip_id") or 0), payload.page
-    )
+    await _show_edit_driver_selection(callback.message, state, payload.page)
 
 
 @router.callback_query(TripCB.filter(F.action == "edit_driver_set"))
@@ -1214,10 +1216,7 @@ async def receive_edit_input(message: Message, state: FSMContext) -> None:
         await _ask_edit_input(message, state, trip_id, field, error)
         return
 
-    stored = value
-    if field == "duration":
-        stored = value
-    trip = _apply_edit(trip_id, field, stored)
+    trip = _apply_edit(trip_id, field, value)
     if trip is None:
         await set_ui_message(
             message,
