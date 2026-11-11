@@ -1066,8 +1066,6 @@ async def cb_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
         )
     elif field in EDIT_FIELDS:
         await _ask_edit_input(callback.message, state, trip_id, field)
-    else:
-        await callback.answer("Campo inválido.", show_alert=True)
 
 
 @router.callback_query(TripCB.filter(F.action == "edit_back"))
@@ -1087,7 +1085,6 @@ async def cb_edit_truck_page(
     if callback.message is None or callback.data is None:
         return
     payload = TripCB.unpack(callback.data)
-    data = await state.get_data()
     await _show_edit_truck_selection(callback.message, state, payload.page)
 
 
@@ -1123,7 +1120,6 @@ async def cb_edit_driver_page(
     if callback.message is None or callback.data is None:
         return
     payload = TripCB.unpack(callback.data)
-    data = await state.get_data()
     await _show_edit_driver_selection(callback.message, state, payload.page)
 
 

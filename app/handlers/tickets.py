@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -21,6 +23,7 @@ from app.utils import kind_label
 from app.views import ticket_add_kb, ticket_menu_view, ticket_trip_list_view
 
 router = Router(name="tickets")
+logger = logging.getLogger(__name__)
 
 
 def done_kb() -> object:
@@ -49,6 +52,43 @@ async def _show_ticket_menu(message: Message, trip_id: int) -> None:
     await edit_or_send(message, text, keyboard)
 
 
+async def _send_ticket_group(
+    bot: Bot, chat_id: int, tickets: list[Ticket]
+) -> int:
+    if not tickets:
+        return 0
+    grouped = [
+        (
+            InputMediaPhoto(media=ticket.telegram_file_id)
+            if ticket.media_type == TicketMedia.photo
+            else InputMediaDocument(media=ticket.telegram_file_id)
+        )
+        for ticket in tickets
+    ]
+    try:
+        await bot.send_media_group(chat_id=chat_id, media=grouped)
+        return len(tickets)
+    except Exception:
+        logger.exception(
+            "No se pudo reenviar un grupo de tickets; se intentará uno por uno"
+        )
+    sent = 0
+    for ticket in tickets:
+        try:
+            if ticket.media_type == TicketMedia.photo:
+                await bot.send_photo(chat_id, ticket.telegram_file_id)
+            else:
+                await bot.send_document(chat_id, ticket.telegram_file_id)
+            sent += 1
+        except Exception:
+            logger.exception(
+                "No se pudo reenviar el ticket %s del viaje %s",
+                ticket.id,
+                ticket.trip_id,
+            )
+    return sent
+
+
 async def _send_tickets(bot: Bot, chat_id: int, tickets: list[Ticket]) -> int:
     if not tickets:
         return 0
@@ -58,21 +98,16 @@ async def _send_tickets(bot: Bot, chat_id: int, tickets: list[Ticket]) -> int:
     documents = [
         ticket for ticket in tickets if ticket.media_type == TicketMedia.document
     ]
+    sent = 0
     for start in range(0, len(photos), 10):
-        chunk = photos[start : start + 10]
-        await bot.send_media_group(
-            chat_id=chat_id,
-            media=[InputMediaPhoto(media=ticket.telegram_file_id) for ticket in chunk],
+        sent += await _send_ticket_group(
+            bot, chat_id, photos[start : start + 10]
         )
     for start in range(0, len(documents), 10):
-        chunk = documents[start : start + 10]
-        await bot.send_media_group(
-            chat_id=chat_id,
-            media=[
-                InputMediaDocument(media=ticket.telegram_file_id) for ticket in chunk
-            ],
+        sent += await _send_ticket_group(
+            bot, chat_id, documents[start : start + 10]
         )
-    return len(tickets)
+    return sent
 
 
 @router.message(Command("tickets"))
@@ -214,7 +249,12 @@ async def cb_ticket_resend_all(
         await callback.answer("No hay tickets para reenviar.", show_alert=True)
         return
     total = await _send_tickets(callback.bot, callback.message.chat.id, tickets)
-    await callback.answer(f"Reenviando {total} tickets.")
+    if total == 0:
+        await callback.answer(
+            "No se pudieron reenviar los tickets.", show_alert=True
+        )
+        return
+    await callback.answer(f"Se reenviaron {total} tickets.")
 
 
 @router.callback_query(TicketCB.filter(F.action == "resend_kind"))
@@ -228,6 +268,7 @@ async def cb_ticket_resend_kind(
     try:
         kind = TicketKind(payload.value)
     except ValueError:
+        await callback.answer("Categoría inválida.", show_alert=True)
         return
     with session_scope() as db:
         tickets = [
@@ -239,7 +280,12 @@ async def cb_ticket_resend_kind(
         await callback.answer("No hay tickets de esa categoría.", show_alert=True)
         return
     total = await _send_tickets(callback.bot, callback.message.chat.id, tickets)
-    await callback.answer(f"Reenviando {total} tickets.")
+    if total == 0:
+        await callback.answer(
+            "No se pudieron reenviar los tickets.", show_alert=True
+        )
+        return
+    await callback.answer(f"Se reenviaron {total} tickets.")
 
 
 @router.message(StateFilter(TicketFlow.media), F.photo)
