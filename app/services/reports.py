@@ -69,7 +69,10 @@ def _headers(settings: Settings, include_status: bool) -> list[str]:
         "% Conductor",
         f"Pago carga ({settings.currency})",
         f"Pago conductor ({settings.currency})",
+        f"Gastos tickets ({settings.currency})",
+        f"Ganancia neta ({settings.currency})",
         "Tickets",
+        "Tickets sin monto",
         "Notas",
     ]
     if include_status:
@@ -114,7 +117,10 @@ def _set_widths(ws, headers: list[str]) -> None:
         "% Conductor": 12,
         f"Pago carga ({settings.currency})": 16,
         f"Pago conductor ({settings.currency})": 18,
+        f"Gastos tickets ({settings.currency})": 18,
+        f"Ganancia neta ({settings.currency})": 18,
         "Tickets": 9,
+        "Tickets sin monto": 16,
         "Notas": 42,
     }
     for index, header in enumerate(headers, start=1):
@@ -137,7 +143,10 @@ def _write_trip_row(ws, row: int, trip: Trip, headers: list[str], include_status
         "% Conductor": float(trip.driver_percentage) / 100,
         f"Pago carga ({settings.currency})": float(trip.cargo_payment),
         f"Pago conductor ({settings.currency})": float(trip.driver_pay),
+        f"Gastos tickets ({settings.currency})": float(trip.ticket_expenses),
+        f"Ganancia neta ({settings.currency})": float(trip.net_profit),
         "Tickets": _ticket_count(list(trip.tickets)),
+        "Tickets sin monto": trip.tickets_without_amount,
         "Notas": trip.notes or "",
     }
 
@@ -155,7 +164,9 @@ def _write_trip_row(ws, row: int, trip: Trip, headers: list[str], include_status
             cell.number_format = "0.00%"
         elif header.startswith("Pago"):
             cell.number_format = "#,##0.00"
-        elif header == "Tickets":
+        elif header.startswith("Gastos") or header.startswith("Ganancia"):
+            cell.number_format = "#,##0.00"
+        elif header.startswith("Tickets"):
             cell.number_format = "0"
 
 
@@ -178,7 +189,14 @@ def _write_total_row(
         f"Pago conductor ({settings.currency})": float(
             sum((trip.driver_pay for trip in trips), Decimal("0"))
         ),
+        f"Gastos tickets ({settings.currency})": float(
+            _decimal_sum(trips, "ticket_expenses")
+        ),
+        f"Ganancia neta ({settings.currency})": float(
+            _decimal_sum(trips, "net_profit")
+        ),
         "Tickets": sum(_ticket_count(list(trip.tickets)) for trip in trips),
+        "Tickets sin monto": sum(trip.tickets_without_amount for trip in trips),
     }
     for column in range(1, len(headers) + 1):
         cell = ws.cell(row=row, column=column)
@@ -193,7 +211,9 @@ def _write_total_row(
                 cell.number_format = "#,##0.00"
             elif header.startswith("Pago"):
                 cell.number_format = "#,##0.00"
-            elif header == "Tickets":
+            elif header.startswith("Gastos") or header.startswith("Ganancia"):
+                cell.number_format = "#,##0.00"
+            elif header.startswith("Tickets"):
                 cell.number_format = "0"
     ws.cell(row=row, column=columns["Camión"]).alignment = Alignment(
         horizontal="left", vertical="center"
@@ -427,6 +447,10 @@ def build_summary_text(
         in_progress = len(group_trips) - finished
         truck = group_trips[0].truck
         ticket_total = sum(len(trip.tickets) for trip in group_trips)
+        pending_total = sum(trip.tickets_without_amount for trip in group_trips)
+        net_label = (
+            "Ganancia neta parcial" if pending_total else "Ganancia neta"
+        )
         lines.extend(
             [
                 f"<b>{safe_escape(truck.name)}</b> (#{truck.id})",
@@ -451,12 +475,22 @@ def build_summary_text(
                     "Pago conductores: "
                     f"{format_money(sum((trip.driver_pay for trip in group_trips), Decimal('0')), settings.currency)}"
                 ),
-                f"Tickets: {ticket_total}",
+                (
+                    "Gastos de tickets: "
+                    f"{format_money(_decimal_sum(group_trips, 'ticket_expenses'), settings.currency)}"
+                ),
+                (
+                    f"{net_label}: "
+                    f"{format_money(_decimal_sum(group_trips, 'net_profit'), settings.currency)}"
+                ),
+                f"Tickets: {ticket_total} (sin monto: {pending_total})",
                 "",
             ]
         )
 
     finished_total = sum(1 for trip in trips if trip.status == TripStatus.finished)
+    pending_total = sum(trip.tickets_without_amount for trip in trips)
+    net_label = "Ganancia neta parcial" if pending_total else "Ganancia neta"
     lines.extend(
         [
             "<b>Totales</b>",
@@ -475,6 +509,15 @@ def build_summary_text(
                 "Pago conductores: "
                 f"{format_money(sum((trip.driver_pay for trip in trips), Decimal('0')), settings.currency)}"
             ),
+            (
+                "Gastos de tickets: "
+                f"{format_money(_decimal_sum(trips, 'ticket_expenses'), settings.currency)}"
+            ),
+            (
+                f"{net_label}: "
+                f"{format_money(_decimal_sum(trips, 'net_profit'), settings.currency)}"
+            ),
+            f"Tickets sin monto: {pending_total}",
         ]
     )
     return "\n".join(lines)

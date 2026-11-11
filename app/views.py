@@ -103,7 +103,18 @@ def trip_detail_view(trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
         f"Pago de la carga: {format_money(trip.cargo_payment, settings.currency)}",
         f"Pago del conductor: {format_money(trip.driver_pay, settings.currency)}",
         f"Tickets: {len(trip.tickets)}",
+        f"Gastos de tickets: {format_money(trip.ticket_expenses, settings.currency)}",
     ]
+    if trip.tickets_without_amount:
+        lines.append(f"Tickets sin monto: {trip.tickets_without_amount}")
+        lines.append(
+            "Ganancia neta parcial: "
+            f"{format_money(trip.net_profit, settings.currency)}"
+        )
+    else:
+        lines.append(
+            f"Ganancia neta: {format_money(trip.net_profit, settings.currency)}"
+        )
     if trip.notes:
         lines.append(f"Notas: {safe_escape(trip.notes)}")
 
@@ -298,21 +309,32 @@ def ticket_counts(tickets: list[Ticket]) -> dict[str, int]:
 
 
 def ticket_menu_view(trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
     counts = ticket_counts(list(trip.tickets))
     total = len(trip.tickets)
     lines = [
         f"<b>Tickets del viaje #{trip.id}</b>",
-        f"{format_date(trip.trip_date)} · {safe_escape(trip.truck.name)}",
+        f"{format_date(trip.trip_date)} A� {safe_escape(trip.truck.name)}",
         f"Total: {total}",
-        "",
-        f"Gasolina: {counts.get('fuel', 0)}",
-        f"Mantenimiento: {counts.get('maintenance', 0)}",
-        f"Otro: {counts.get('other', 0)}",
+        f"Gastos: {format_money(trip.ticket_expenses, settings.currency)}",
     ]
+    if trip.tickets_without_amount:
+        lines.append(f"Sin monto: {trip.tickets_without_amount}")
+    lines.extend(
+        [
+            "",
+            f"Gasolina: {counts.get('fuel', 0)}",
+            f"Mantenimiento: {counts.get('maintenance', 0)}",
+            f"Otro: {counts.get('other', 0)}",
+        ]
+    )
     rows: list[list[InlineKeyboardButton]] = [
-        [button("Agregar imágenes", TicketCB(action="add", trip_id=trip.id))]
+        [button("Agregar imA�genes", TicketCB(action="add", trip_id=trip.id))]
     ]
     if total:
+        rows.append(
+            [button("Ver y editar montos", TicketCB(action="amounts", trip_id=trip.id))]
+        )
         rows.append(
             [button("Reenviar todos", TicketCB(action="resend_all", trip_id=trip.id))]
         )
@@ -356,6 +378,114 @@ def ticket_add_kb(trip_id: int) -> InlineKeyboardMarkup:
         [button("Volver", TicketCB(action="menu", trip_id=trip_id))],
     ]
     return markup(rows)
+
+
+def ticket_amounts_view(
+    trip: Trip,
+    tickets: list[Ticket],
+    page: int,
+    has_next: bool,
+) -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    rows: list[list[InlineKeyboardButton]] = []
+    for ticket in tickets:
+        if ticket.amount is None:
+            amount = "sin monto"
+        else:
+            amount = format_money(ticket.amount, settings.currency)
+        label = truncate(
+            f"#{ticket.id} - {kind_label(ticket.kind)} - {amount}",
+            58,
+        )
+        rows.append(
+            [
+                button(
+                    label,
+                    TicketCB(
+                        action="amount_edit",
+                        trip_id=trip.id,
+                        value=str(ticket.id),
+                    ),
+                )
+            ]
+        )
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(
+            button(
+                "Anterior",
+                TicketCB(action="amounts", trip_id=trip.id, page=page - 1),
+            )
+        )
+    if has_next:
+        nav.append(
+            button(
+                "Siguiente",
+                TicketCB(action="amounts", trip_id=trip.id, page=page + 1),
+            )
+        )
+    if nav:
+        rows.append(nav)
+    rows.append([button("Volver", TicketCB(action="menu", trip_id=trip.id))])
+    text = (
+        f"<b>Montos de tickets del viaje #{trip.id}</b>\n"
+        f"Gastos actuales: {format_money(trip.ticket_expenses, settings.currency)}\n"
+        f"Sin monto: {trip.tickets_without_amount}\n\n"
+        "Elige un ticket para corregir su monto o volver a analizarlo."
+    )
+    return text, markup(rows)
+
+
+def ticket_amount_prompt_view(
+    ticket: Ticket, note: str | None = None
+) -> tuple[str, InlineKeyboardMarkup]:
+    settings = get_settings()
+    current = (
+        "Sin monto"
+        if ticket.amount is None
+        else format_money(ticket.amount, settings.currency)
+    )
+    source = {
+        "ai": "detectado por IA",
+        "manual": "cargado manualmente",
+    }.get(ticket.amount_source or "", "sin definir")
+    text = (
+        f"<b>Ticket #{ticket.id}</b>\n"
+        f"Categoria: {kind_label(ticket.kind)}\n"
+        f"Monto actual: {current} ({source})\n\n"
+        "Escribe el monto total del ticket o usa los botones."
+    )
+    if note:
+        text = f"{text}\n\n{note}"
+    rows = [
+        [
+            button(
+                "Reanalizar con IA",
+                TicketCB(
+                    action="retry_ai",
+                    trip_id=ticket.trip_id,
+                    value=str(ticket.id),
+                ),
+            )
+        ]
+    ]
+    if ticket.amount is not None:
+        rows.append(
+            [
+                button(
+                    "Quitar monto",
+                    TicketCB(
+                        action="amount_clear",
+                        trip_id=ticket.trip_id,
+                        value=str(ticket.id),
+                    ),
+                )
+            ]
+        )
+    rows.append(
+        [button("Volver", TicketCB(action="amounts", trip_id=ticket.trip_id))]
+    )
+    return text, markup(rows)
 
 
 def report_menu_view() -> tuple[str, InlineKeyboardMarkup]:

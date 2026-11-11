@@ -117,6 +117,27 @@ class Trip(Base):
             Decimal("0.01")
         )
 
+    @property
+    def ticket_expenses(self) -> Decimal:
+        return sum(
+            (
+                ticket.amount
+                for ticket in self.tickets
+                if ticket.amount is not None
+            ),
+            Decimal("0.00"),
+        ).quantize(Decimal("0.01"))
+
+    @property
+    def tickets_without_amount(self) -> int:
+        return sum(1 for ticket in self.tickets if ticket.amount is None)
+
+    @property
+    def net_profit(self) -> Decimal:
+        return (self.cargo_payment - self.driver_pay - self.ticket_expenses).quantize(
+            Decimal("0.01")
+        )
+
 
 class Ticket(Base):
     __tablename__ = "tickets"
@@ -139,6 +160,12 @@ class Ticket(Base):
     caption: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    amount_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ai_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ai_processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     uploaded_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 

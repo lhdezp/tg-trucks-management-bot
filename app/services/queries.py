@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -276,6 +276,28 @@ def list_tickets(db: Session, trip_id: int) -> list[Ticket]:
             .order_by(Ticket.created_at.asc(), Ticket.id.asc())
         ).all()
     )
+
+
+def get_ticket(db: Session, ticket_id: int) -> Ticket | None:
+    return db.get(Ticket, ticket_id)
+
+
+def update_ticket_amount(
+    db: Session,
+    ticket: Ticket,
+    *,
+    amount: Decimal | None,
+    source: str | None,
+    ai_model: str | None = None,
+    processed_at: datetime | None = None,
+) -> Ticket:
+    ticket.amount = amount
+    ticket.amount_source = source
+    ticket.ai_model = ai_model
+    if processed_at is not None:
+        ticket.ai_processed_at = processed_at
+    db.flush()
+    return ticket
 
 
 def get_bot_settings(db: Session) -> BotSettings:

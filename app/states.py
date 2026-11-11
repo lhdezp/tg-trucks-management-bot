@@ -27,6 +27,7 @@ class DriverForm(StatesGroup):
 
 class TicketFlow(StatesGroup):
     media = State()
+    amount = State()
 
 
 class ReportFlow(StatesGroup):

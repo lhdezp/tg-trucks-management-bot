@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     timezone: str = "UTC"
     currency: str = "$"
     weight_unit: str = "lb"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_timeout_seconds: float = 20.0
+
+    @field_validator("gemini_api_key", mode="before")
+    @classmethod
+    def validate_gemini_api_key(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("admin_ids")
     @classmethod

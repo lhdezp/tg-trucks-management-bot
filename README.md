@@ -19,6 +19,8 @@ Solo los IDs incluidos en `ADMIN_IDS` pueden usar el bot.
 3. Completa `ADMIN_IDS` con los IDs de Telegram de los administradores,
    separados por comas.
 4. Ajusta `TIMEZONE`, `CURRENCY` y `WEIGHT_UNIT` si hace falta.
+5. Opcional: completa `GEMINI_API_KEY` con una clave de Google AI Studio para
+   leer automaticamente el monto total de cada ticket con Gemini.
 
 Las fechas, las semanas y el reporte automatico usan la zona horaria configurada.
 La base de datos SQLite se crea automaticamente en `DB_PATH`.
@@ -63,8 +65,15 @@ eliminar y adjuntar tickets.
 ### Tickets
 
 Los tickets son imagenes. El bot guarda el identificador de Telegram de cada imagen
-en lugar de descargarla, y permite reenviarlas al chat cuando haga falta. Se pueden
-clasificar como gasolina, mantenimiento u otro.
+en lugar de descargarla de forma permanente, y permite reenviarlas al chat cuando
+haga falta. Se pueden clasificar como gasolina, mantenimiento u otro.
+
+Si `GEMINI_API_KEY` esta configurada, el bot descarga la imagen temporalmente y usa
+Gemini para leer el monto total del ticket. El monto se puede corregir manualmente o
+volver a analizar desde la opcion de montos. Los gastos de tickets se restan de la
+ganancia neta del viaje:
+
+`ganancia neta = pago de la carga - pago del conductor - gastos de tickets`
 
 ### Reportes
 
@@ -73,8 +82,9 @@ Los reportes cubren siempre de lunes a domingo. Se pueden generar:
 - Para todos los camiones (general, agrupado por camion).
 - Para un camion especifico.
 
-Cada archivo Excel tiene tres hojas: `Finalizados`, `En curso` y `Ambos`. El archivo
-se envia al chat y se elimina del servidor despues del envio.
+Cada archivo Excel tiene tres hojas: `Finalizados`, `En curso` y `Ambos`. Incluye
+gastos de tickets y ganancia neta por viaje, y marca los tickets que todavia no
+tienen monto. El archivo se envia al chat y se elimina del servidor despues del envio.
 
 ### Reporte automatico
 
