@@ -107,6 +107,11 @@ def trip_detail_view(trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     ]
     if trip.tickets_without_amount:
         lines.append(f"Tickets sin monto: {trip.tickets_without_amount}")
+    if trip.tickets_pending_confirmation:
+        lines.append(
+            f"Tickets sin confirmar: {trip.tickets_pending_confirmation}"
+        )
+    if trip.has_pending_amounts:
         lines.append(
             "Ganancia neta parcial: "
             f"{format_money(trip.net_profit, settings.currency)}"
@@ -320,6 +325,8 @@ def ticket_menu_view(trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     ]
     if trip.tickets_without_amount:
         lines.append(f"Sin monto: {trip.tickets_without_amount}")
+    if trip.tickets_pending_confirmation:
+        lines.append(f"Sin confirmar: {trip.tickets_pending_confirmation}")
     lines.extend(
         [
             "",
@@ -393,6 +400,8 @@ def ticket_amounts_view(
             amount = "sin monto"
         else:
             amount = format_money(ticket.amount, settings.currency)
+            if ticket.amount_source == "ai_pending":
+                amount = f"{amount} sin confirmar"
         label = truncate(
             f"#{ticket.id} - {kind_label(ticket.kind)} - {amount}",
             58,
@@ -430,7 +439,8 @@ def ticket_amounts_view(
     text = (
         f"<b>Montos de tickets del viaje #{trip.id}</b>\n"
         f"Gastos actuales: {format_money(trip.ticket_expenses, settings.currency)}\n"
-        f"Sin monto: {trip.tickets_without_amount}\n\n"
+        f"Sin monto: {trip.tickets_without_amount}\n"
+        f"Sin confirmar: {trip.tickets_pending_confirmation}\n\n"
         "Elige un ticket para corregir su monto o volver a analizarlo."
     )
     return text, markup(rows)
@@ -446,7 +456,8 @@ def ticket_amount_prompt_view(
         else format_money(ticket.amount, settings.currency)
     )
     source = {
-        "ai": "detectado por IA",
+        "ai": "confirmado por el usuario",
+        "ai_pending": "detectado por IA, sin confirmar",
         "manual": "cargado manualmente",
     }.get(ticket.amount_source or "", "sin definir")
     text = (
@@ -455,9 +466,28 @@ def ticket_amount_prompt_view(
         f"Monto actual: {current} ({source})\n\n"
         "Escribe el monto total del ticket o usa los botones."
     )
+    if ticket.amount_source == "ai_pending":
+        text = (
+            f"{text}\n\nConfirma que el monto detectado es correcto "
+            "o escribi el monto correcto."
+        )
     if note:
         text = f"{text}\n\n{note}"
-    rows = [
+    rows: list[list[InlineKeyboardButton]] = []
+    if ticket.amount is not None and ticket.amount_source == "ai_pending":
+        rows.append(
+            [
+                button(
+                    "Confirmar monto",
+                    TicketCB(
+                        action="amount_confirm",
+                        trip_id=ticket.trip_id,
+                        value=str(ticket.id),
+                    ),
+                )
+            ]
+        )
+    rows.append(
         [
             button(
                 "Reanalizar con IA",
@@ -468,7 +498,7 @@ def ticket_amount_prompt_view(
                 ),
             )
         ]
-    ]
+    )
     if ticket.amount is not None:
         rows.append(
             [

@@ -73,6 +73,7 @@ def _headers(settings: Settings, include_status: bool) -> list[str]:
         f"Ganancia neta ({settings.currency})",
         "Tickets",
         "Tickets sin monto",
+        "Tickets sin confirmar",
         "Notas",
     ]
     if include_status:
@@ -121,6 +122,7 @@ def _set_widths(ws, headers: list[str]) -> None:
         f"Ganancia neta ({settings.currency})": 18,
         "Tickets": 9,
         "Tickets sin monto": 16,
+        "Tickets sin confirmar": 18,
         "Notas": 42,
     }
     for index, header in enumerate(headers, start=1):
@@ -147,6 +149,7 @@ def _write_trip_row(ws, row: int, trip: Trip, headers: list[str], include_status
         f"Ganancia neta ({settings.currency})": float(trip.net_profit),
         "Tickets": _ticket_count(list(trip.tickets)),
         "Tickets sin monto": trip.tickets_without_amount,
+        "Tickets sin confirmar": trip.tickets_pending_confirmation,
         "Notas": trip.notes or "",
     }
 
@@ -197,6 +200,9 @@ def _write_total_row(
         ),
         "Tickets": sum(_ticket_count(list(trip.tickets)) for trip in trips),
         "Tickets sin monto": sum(trip.tickets_without_amount for trip in trips),
+        "Tickets sin confirmar": sum(
+            trip.tickets_pending_confirmation for trip in trips
+        ),
     }
     for column in range(1, len(headers) + 1):
         cell = ws.cell(row=row, column=column)
@@ -448,8 +454,13 @@ def build_summary_text(
         truck = group_trips[0].truck
         ticket_total = sum(len(trip.tickets) for trip in group_trips)
         pending_total = sum(trip.tickets_without_amount for trip in group_trips)
+        pending_confirm_total = sum(
+            trip.tickets_pending_confirmation for trip in group_trips
+        )
         net_label = (
-            "Ganancia neta parcial" if pending_total else "Ganancia neta"
+            "Ganancia neta parcial"
+            if pending_total or pending_confirm_total
+            else "Ganancia neta"
         )
         lines.extend(
             [
@@ -483,14 +494,24 @@ def build_summary_text(
                     f"{net_label}: "
                     f"{format_money(_decimal_sum(group_trips, 'net_profit'), settings.currency)}"
                 ),
-                f"Tickets: {ticket_total} (sin monto: {pending_total})",
+                (
+                    f"Tickets: {ticket_total} (sin monto: {pending_total}, "
+                    f"sin confirmar: {pending_confirm_total})"
+                ),
                 "",
             ]
         )
 
     finished_total = sum(1 for trip in trips if trip.status == TripStatus.finished)
     pending_total = sum(trip.tickets_without_amount for trip in trips)
-    net_label = "Ganancia neta parcial" if pending_total else "Ganancia neta"
+    pending_confirm_total = sum(
+        trip.tickets_pending_confirmation for trip in trips
+    )
+    net_label = (
+        "Ganancia neta parcial"
+        if pending_total or pending_confirm_total
+        else "Ganancia neta"
+    )
     lines.extend(
         [
             "<b>Totales</b>",
@@ -517,7 +538,10 @@ def build_summary_text(
                 f"{net_label}: "
                 f"{format_money(_decimal_sum(trips, 'net_profit'), settings.currency)}"
             ),
-            f"Tickets sin monto: {pending_total}",
+            (
+                f"Tickets: sin monto: {pending_total}, "
+                f"sin confirmar: {pending_confirm_total}"
+            ),
         ]
     )
     return "\n".join(lines)

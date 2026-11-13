@@ -53,6 +53,53 @@ def done_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _saved_kb(
+    trip_id: int, ticket_id: int, amount: Decimal | None
+) -> InlineKeyboardMarkup:
+    rows: list[list] = []
+    if amount is None:
+        rows.append(
+            [
+                button(
+                    "Insertar monto manual",
+                    TicketCB(
+                        action="amount_edit",
+                        trip_id=trip_id,
+                        value=str(ticket_id),
+                    ),
+                )
+            ]
+        )
+    else:
+        rows.append(
+            [
+                button(
+                    "Si, es correcto",
+                    TicketCB(
+                        action="amount_confirm",
+                        trip_id=trip_id,
+                        value=str(ticket_id),
+                    ),
+                )
+            ]
+        )
+        rows.append(
+            [
+                button(
+                    "Corregir monto",
+                    TicketCB(
+                        action="amount_edit",
+                        trip_id=trip_id,
+                        value=str(ticket_id),
+                    ),
+                )
+            ]
+        )
+    rows.append([button("Listo", TicketCB(action="done"))])
+    rows.append([button("Cancelar", MenuCB(action="cancel"))])
+    return markup(rows)
+
+
 async def _show_trip_list(message: Message, page: int) -> None:
     with session_scope() as db:
         trips, has_next = list_trips(db, page)
@@ -98,15 +145,26 @@ def _saved_text(
         f"Imagenes guardadas. El viaje tiene {count} tickets.",
     ]
     if amount is not None:
-        lines.append(f"Monto detectado: {format_money(amount, settings.currency)}")
+        lines.append(
+            f"Monto detectado: {format_money(amount, settings.currency)} "
+            "(sin confirmar)"
+        )
+        lines.append(
+            "Confirma que el monto es correcto o corregilo antes de continuar."
+        )
     elif error:
         lines.append(error)
+        lines.append("Podes insertar el monto manualmente con el boton de abajo.")
     lines.append(
-        f"Gastos del viaje: "
+        f"Gastos confirmados del viaje: "
         f"{format_money(trip.ticket_expenses, settings.currency)}"
     )
     if trip.tickets_without_amount:
         lines.append(f"Tickets sin monto: {trip.tickets_without_amount}")
+    if trip.tickets_pending_confirmation:
+        lines.append(
+            f"Tickets sin confirmar: {trip.tickets_pending_confirmation}"
+        )
     lines.append("Envia otra imagen o pulsa <b>Listo</b>.")
     return "\n".join(lines)
 
@@ -129,7 +187,7 @@ async def _finish_ticket_analysis(
                     db,
                     ticket,
                     amount=amount,
-                    source="ai",
+                    source="ai_pending",
                     ai_model=get_settings().gemini_model,
                     processed_at=utcnow_naive(),
                 )
@@ -155,7 +213,9 @@ async def _finish_ticket_analysis(
             notice = error or "No se pudo detectar el monto automaticamente."
         await message.answer(notice)
         return
-    await set_ui_message(message, state, text, done_kb())
+    await set_ui_message(
+        message, state, text, _saved_kb(trip_id, ticket_id, amount)
+    )
 
 
 async def _analyze_ticket(
@@ -499,6 +559,48 @@ async def cb_ticket_amount_clear(
     await set_ui_message(callback.message, state, text, keyboard)
 
 
+@router.callback_query(TicketCB.filter(F.action == "amount_confirm"))
+async def cb_ticket_amount_confirm(
+    callback: CallbackQuery, state: FSMContext
+) -> None:
+    if callback.message is None or callback.data is None:
+        await callback.answer()
+        return
+    payload = TicketCB.unpack(callback.data)
+    try:
+        ticket_id = int(payload.value)
+    except ValueError:
+        await callback.answer("Ticket invalido.", show_alert=True)
+        return
+    with session_scope() as db:
+        ticket = get_ticket(db, ticket_id)
+        if ticket is None:
+            await callback.answer("El ticket ya no existe.", show_alert=True)
+            return
+        if ticket.amount is None or ticket.amount_source != "ai_pending":
+            await callback.answer(
+                "El ticket no tiene un monto pendiente de confirmacion.",
+                show_alert=True,
+            )
+            return
+        update_ticket_amount(
+            db,
+            ticket,
+            amount=ticket.amount,
+            source="ai",
+            ai_model=ticket.ai_model,
+            processed_at=ticket.ai_processed_at,
+        )
+        trip = get_trip(db, ticket.trip_id)
+        if trip is None:
+            text, keyboard = "El viaje ya no existe.", tickets_menu_kb()
+        else:
+            text, keyboard = ticket_menu_view(trip)
+    await state.clear()
+    await callback.answer("Monto confirmado.")
+    await edit_or_send(callback.message, text, keyboard)
+
+
 @router.callback_query(TicketCB.filter(F.action == "retry_ai"))
 async def cb_ticket_retry_ai(
     callback: CallbackQuery, state: FSMContext
@@ -567,11 +669,11 @@ async def cb_ticket_retry_ai(
                 db,
                 ticket,
                 amount=amount,
-                source="ai",
+                source="ai_pending",
                 ai_model=get_settings().gemini_model,
                 processed_at=utcnow_naive(),
             )
-            note = "Monto actualizado por IA."
+            note = "Monto detectado por IA. Confirma que es correcto."
         text, keyboard = ticket_amount_prompt_view(ticket, note=note)
     await set_ui_message(callback.message, state, text, keyboard)
 

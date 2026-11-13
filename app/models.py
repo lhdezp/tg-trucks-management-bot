@@ -124,6 +124,7 @@ class Trip(Base):
                 ticket.amount
                 for ticket in self.tickets
                 if ticket.amount is not None
+                and ticket.amount_source != "ai_pending"
             ),
             Decimal("0.00"),
         ).quantize(Decimal("0.01"))
@@ -131,6 +132,20 @@ class Trip(Base):
     @property
     def tickets_without_amount(self) -> int:
         return sum(1 for ticket in self.tickets if ticket.amount is None)
+
+    @property
+    def tickets_pending_confirmation(self) -> int:
+        return sum(
+            1
+            for ticket in self.tickets
+            if ticket.amount is not None and ticket.amount_source == "ai_pending"
+        )
+
+    @property
+    def has_pending_amounts(self) -> bool:
+        return bool(
+            self.tickets_without_amount or self.tickets_pending_confirmation
+        )
 
     @property
     def net_profit(self) -> Decimal:
