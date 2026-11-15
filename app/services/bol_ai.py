@@ -15,8 +15,14 @@ logger = logging.getLogger(__name__)
 PROMPT = (
     "Analiza la imagen de un BOL (Bill of Lading) o documento de carga. "
     "Devuelve estos datos del viaje: "
-    "origin (ciudad y estado de origen, o direccion corta tal como aparece), "
-    "destination (ciudad y estado de destino, o direccion corta tal como aparece), "
+    "origin (la direccion de origen tan precisa como permiten los datos "
+    "visibles en la imagen: calle y numero si aparecen, si no ciudad y estado, "
+    "o lo que se pueda leer; transcribir y literalizar lo que se ve, sin "
+    "inventar precision que no este en la imagen), "
+    "destination (la direccion de destino tan precisa como permiten los datos "
+    "visibles en la imagen: calle y numero si aparecen, si no ciudad y estado, "
+    "o lo que se pueda leer; transcribir y literalizar lo que se ve, sin "
+    "inventar precision que no este en la imagen), "
     "bol_number (numero de BOL, numero de carga o de manifiesto tal como aparece), "
     "date (fecha del viaje en formato ISO AAAA-MM-DD), "
     "weight_lb (peso de la carga en libras; si el documento muestra kilogramos, "
@@ -31,8 +37,14 @@ PROMPT = (
 
 
 class BolExtraction(BaseModel):
-    origin: str = Field(default="", description="Origen del viaje")
-    destination: str = Field(default="", description="Destino del viaje")
+    origin: str = Field(
+        default="",
+        description="Origen del viaje, tan preciso como permiten los datos visibles en la imagen",
+    )
+    destination: str = Field(
+        default="",
+        description="Destino del viaje, tan preciso como permiten los datos visibles en la imagen",
+    )
     bol_number: str = Field(default="", description="Numero de BOL o de carga")
     date: str = Field(default="", description="Fecha en formato ISO AAAA-MM-DD")
     weight_lb: float = Field(default=0, description="Peso de la carga en libras")
