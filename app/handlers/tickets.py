@@ -19,12 +19,13 @@ from app.config import get_settings
 from app.database import session_scope
 from app.keyboards import button, markup, tickets_menu_kb
 from app.models import Ticket, TicketKind, TicketMedia, Trip, utcnow_naive
-from app.services import ticket_ai
+from app.services import ticket_ai, ticket_queue
 from app.services.queries import (
     PAGE_SIZE,
     add_ticket,
     get_ticket,
     get_trip,
+    list_pending_tickets,
     list_tickets,
     list_trips,
     update_ticket_amount,
@@ -169,20 +170,69 @@ def _saved_text(
     return "\n".join(lines)
 
 
+def _pending_view(
+    trip: Trip, ticket: Ticket
+) -> tuple[str, InlineKeyboardMarkup]:
+    count = len(trip.tickets)
+    if ticket.amount is not None:
+        return (
+            _saved_text(trip, ticket.kind, count, ticket.amount),
+            _saved_kb(trip.id, ticket.id, ticket.amount),
+        )
+    return (
+        _saved_text(
+            trip,
+            ticket.kind,
+            count,
+            error="No se pudo detectar el monto automaticamente.",
+        ),
+        _saved_kb(trip.id, ticket.id, None),
+    )
+
+
+async def _show_next_pending(
+    message: Message, state: FSMContext, trip_id: int
+) -> bool:
+    text = keyboard = None
+    kind_value = None
+    trip_missing = False
+    with session_scope() as db:
+        pending = list_pending_tickets(db, trip_id)
+        ticket = pending[0] if pending else None
+        if ticket is not None:
+            trip = get_trip(db, trip_id)
+            if trip is None:
+                trip_missing = True
+            else:
+                text, keyboard = _pending_view(trip, ticket)
+                kind_value = ticket.kind.value
+    if ticket is None:
+        return False
+    if trip_missing:
+        await state.clear()
+        await set_ui_message(
+            message, state, "El viaje ya no existe.", tickets_menu_kb()
+        )
+        return True
+    await state.set_state(TicketFlow.media)
+    await state.update_data(ticket_trip_id=trip_id, ticket_kind=kind_value)
+    await set_ui_message(message, state, text, keyboard)
+    return True
+
+
 async def _finish_ticket_analysis(
     message: Message,
     state: FSMContext,
     *,
     trip_id: int,
-    kind: TicketKind,
     ticket_id: int,
     amount: Decimal | None,
     error: str | None,
 ) -> None:
     with session_scope() as db:
-        if amount is not None:
-            ticket = get_ticket(db, ticket_id)
-            if ticket is not None:
+        ticket = get_ticket(db, ticket_id)
+        if ticket is not None:
+            if amount is not None:
                 update_ticket_amount(
                     db,
                     ticket,
@@ -191,31 +241,34 @@ async def _finish_ticket_analysis(
                     ai_model=get_settings().gemini_model,
                     processed_at=utcnow_naive(),
                 )
-        trip = get_trip(db, trip_id)
-        if trip is None:
-            await set_ui_message(
-                message,
-                state,
-                "El viaje ya no existe.",
-                tickets_menu_kb(),
-            )
-            return
-        text = _saved_text(trip, kind, len(trip.tickets), amount, error)
+            else:
+                update_ticket_amount(
+                    db,
+                    ticket,
+                    amount=None,
+                    source="ai_failed",
+                    ai_model=None,
+                    processed_at=utcnow_naive(),
+                )
     if await state.get_state() != TicketFlow.media.state:
         settings = get_settings()
+        with session_scope() as db:
+            trip = get_trip(db, trip_id)
         if amount is not None:
+            gastos = (
+                format_money(trip.ticket_expenses, settings.currency)
+                if trip is not None
+                else "?"
+            )
             notice = (
                 f"Monto detectado: {format_money(amount, settings.currency)}\n"
-                f"Gastos del viaje: "
-                f"{format_money(trip.ticket_expenses, settings.currency)}"
+                f"Gastos del viaje: {gastos}"
             )
         else:
             notice = error or "No se pudo detectar el monto automaticamente."
         await message.answer(notice)
         return
-    await set_ui_message(
-        message, state, text, _saved_kb(trip_id, ticket_id, amount)
-    )
+    await _show_next_pending(message, state, trip_id)
 
 
 async def _analyze_ticket(
@@ -223,7 +276,6 @@ async def _analyze_ticket(
     state: FSMContext,
     *,
     trip_id: int,
-    kind: TicketKind,
     ticket_id: int,
     file_id: str,
     file_size: int | None,
@@ -234,7 +286,6 @@ async def _analyze_ticket(
             message,
             state,
             trip_id=trip_id,
-            kind=kind,
             ticket_id=ticket_id,
             amount=None,
             error="El analisis automatico de montos no esta configurado.",
@@ -253,7 +304,6 @@ async def _analyze_ticket(
             message,
             state,
             trip_id=trip_id,
-            kind=kind,
             ticket_id=ticket_id,
             amount=None,
             error="No se pudo descargar la imagen para analizarla.",
@@ -268,7 +318,6 @@ async def _analyze_ticket(
         message,
         state,
         trip_id=trip_id,
-        kind=kind,
         ticket_id=ticket_id,
         amount=amount,
         error=(
@@ -446,6 +495,16 @@ async def cb_ticket_done(callback: CallbackQuery, state: FSMContext) -> None:
         return
     data = await state.get_data()
     trip_id = int(data.get("ticket_trip_id") or 0)
+    if trip_id:
+        with session_scope() as db:
+            pending = list_pending_tickets(db, trip_id)
+        if pending:
+            await callback.answer(
+                f"Hay {len(pending)} ticket(s) pendientes de monto.",
+                show_alert=True,
+            )
+            await _show_next_pending(callback.message, state, trip_id)
+            return
     with session_scope() as db:
         trip = get_trip(db, trip_id)
         if trip is None:
@@ -549,6 +608,8 @@ async def cb_ticket_amount_clear(
         text, keyboard = ticket_amount_prompt_view(
             ticket, note="Monto eliminado."
         )
+    if await _show_next_pending(callback.message, state, ticket_trip_id):
+        return
     await state.clear()
     await remember_ui_message(callback, state)
     await state.set_state(TicketFlow.amount)
@@ -591,13 +652,17 @@ async def cb_ticket_amount_confirm(
             ai_model=ticket.ai_model,
             processed_at=ticket.ai_processed_at,
         )
-        trip = get_trip(db, ticket.trip_id)
+        trip_id = ticket.trip_id
+    await callback.answer("Monto confirmado.")
+    if await _show_next_pending(callback.message, state, trip_id):
+        return
+    await state.clear()
+    with session_scope() as db:
+        trip = get_trip(db, trip_id)
         if trip is None:
             text, keyboard = "El viaje ya no existe.", tickets_menu_kb()
         else:
             text, keyboard = ticket_menu_view(trip)
-    await state.clear()
-    await callback.answer("Monto confirmado.")
     await edit_or_send(callback.message, text, keyboard)
 
 
@@ -772,6 +837,8 @@ async def receive_ticket_amount(message: Message, state: FSMContext) -> None:
             ai_model=None,
             processed_at=None,
         )
+    if await _show_next_pending(message, state, trip_id):
+        return
     view = _amounts_view(trip_id, 0)
     if view is None:
         await state.clear()
@@ -812,16 +879,16 @@ async def receive_ticket_photo(message: Message, state: FSMContext) -> None:
     if not created:
         await message.answer("Esa imagen ya estaba agregada al viaje.")
         return
-    await _analyze_ticket(
-        message,
-        state,
-        trip_id=trip_id,
-        kind=kind,
-        ticket_id=ticket.id,
-        file_id=file_id,
-        file_size=file_size,
-        mime_type=mime_type,
-    )
+    async with ticket_queue.lock_for(message.chat.id, trip_id):
+        await _analyze_ticket(
+            message,
+            state,
+            trip_id=trip_id,
+            ticket_id=ticket.id,
+            file_id=file_id,
+            file_size=file_size,
+            mime_type=mime_type,
+        )
 
 
 @router.message(StateFilter(TicketFlow.media), F.document)
@@ -857,16 +924,16 @@ async def receive_ticket_document(message: Message, state: FSMContext) -> None:
     if not created:
         await message.answer("Esa imagen ya estaba agregada al viaje.")
         return
-    await _analyze_ticket(
-        message,
-        state,
-        trip_id=trip_id,
-        kind=kind,
-        ticket_id=ticket.id,
-        file_id=file_id,
-        file_size=file_size,
-        mime_type=mime_type,
-    )
+    async with ticket_queue.lock_for(message.chat.id, trip_id):
+        await _analyze_ticket(
+            message,
+            state,
+            trip_id=trip_id,
+            ticket_id=ticket.id,
+            file_id=file_id,
+            file_size=file_size,
+            mime_type=mime_type,
+        )
 
 
 @router.message(StateFilter(TicketFlow.media))

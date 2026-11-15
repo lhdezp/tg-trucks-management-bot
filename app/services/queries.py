@@ -278,6 +278,19 @@ def list_tickets(db: Session, trip_id: int) -> list[Ticket]:
     )
 
 
+def list_pending_tickets(db: Session, trip_id: int) -> list[Ticket]:
+    return list(
+        db.scalars(
+            select(Ticket)
+            .where(
+                Ticket.trip_id == trip_id,
+                Ticket.amount_source.in_(["ai_pending", "ai_failed"]),
+            )
+            .order_by(Ticket.created_at.asc(), Ticket.id.asc())
+        ).all()
+    )
+
+
 def get_ticket(db: Session, ticket_id: int) -> Ticket | None:
     return db.get(Ticket, ticket_id)
 

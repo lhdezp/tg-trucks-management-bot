@@ -458,6 +458,7 @@ def ticket_amount_prompt_view(
     source = {
         "ai": "confirmado por el usuario",
         "ai_pending": "detectado por IA, sin confirmar",
+        "ai_failed": "no detectado por IA",
         "manual": "cargado manualmente",
     }.get(ticket.amount_source or "", "sin definir")
     text = (
