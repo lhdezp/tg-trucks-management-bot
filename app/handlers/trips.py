@@ -74,6 +74,7 @@ EDIT_FIELDS = [
     "date",
     "status",
     "notes",
+    "bol_number",
 ]
 
 
@@ -201,6 +202,7 @@ def _field_prompt(field: str) -> str:
         "payment": f"Escribe el pago de la carga en {settings.currency} (ej. 1500).",
         "notes": "Escribe las notas del viaje o pulsa Omitir.",
         "date": "Escribe la fecha del viaje (DD/MM/AAAA).",
+        "bol_number": "Escribe el número de BOL.",
     }
     return prompts[field]
 
@@ -210,6 +212,10 @@ async def _delete_user_message(message: Message) -> None:
         await message.delete()
     except TelegramBadRequest:
         pass
+
+
+def _pending_create_fields(data: dict) -> list[str]:
+    return [field for field in CREATE_FIELDS if field not in data]
 
 
 def validate_trip_field(field: str, raw: str) -> tuple[object | None, str | None]:
@@ -264,6 +270,14 @@ def validate_trip_field(field: str, raw: str) -> tuple[object | None, str | None
             return None, "La fecha no puede ser futura."
         return value, None
 
+    if field == "bol_number":
+        value = raw.strip()
+        if not value:
+            return None, "El número de BOL no puede estar vacío."
+        if len(value) > 64:
+            return None, "El número de BOL es demasiado largo (máximo 64 caracteres)."
+        return value, None
+
     if field == "notes":
         value = raw.strip()
         if len(value) > 1000:
@@ -312,6 +326,7 @@ def _confirm_text(data: dict) -> str:
     percentage = Decimal(str(data["percentage"]))
     driver_pay = (payment * percentage / Decimal(100)).quantize(Decimal("0.01"))
     status = TripStatus(data["status"])
+    bol_line = f"BOL: {data['bol_number']}\n" if data.get("bol_number") else ""
     return (
         "<b>Confirmar viaje</b>\n\n"
         f"Camión: {data['truck_name']} (#{data['truck_id']})\n"
@@ -319,6 +334,7 @@ def _confirm_text(data: dict) -> str:
         f"Fecha: {format_date(date.fromisoformat(data['trip_date']))}\n"
         f"Estado: {'Finalizado' if status == TripStatus.finished else 'En curso'}\n"
         f"Ruta: {data['origin']} → {data['destination']}\n"
+        f"{bol_line}"
         f"Millas: {format_number(data['distance'])}\n"
         f"Tiempo: {format_duration(int(data['duration']))}\n"
         f"Peso: {format_number(data['weight'])} {settings.weight_unit}\n"
@@ -401,12 +417,7 @@ async def _show_driver_selection(
     await set_ui_message(message, state, text, markup(rows))
 
 
-async def _begin_create(
-    message: Message, state: FSMContext, ui_msg_id: int | None = None
-) -> None:
-    await state.clear()
-    if ui_msg_id:
-        await state.update_data(ui_msg_id=ui_msg_id)
+async def _trucks_drivers_ready(message: Message, state: FSMContext) -> bool:
     with session_scope() as db:
         trucks = all_active_trucks(db)
         drivers = all_active_drivers(db)
@@ -423,7 +434,7 @@ async def _begin_create(
                 ]
             ),
         )
-        return
+        return False
     if not drivers:
         await state.set_state(TripCreate.driver)
         await set_ui_message(
@@ -437,8 +448,19 @@ async def _begin_create(
                 ]
             ),
         )
-        return
-    await _show_truck_selection(message, state, 0)
+        return False
+    return True
+
+
+async def _begin_create(
+    message: Message, state: FSMContext, ui_msg_id: int | None = None
+) -> None:
+    await state.clear()
+    if ui_msg_id:
+        await state.update_data(ui_msg_id=ui_msg_id)
+    await state.update_data(prefilled=[])
+    if await _trucks_drivers_ready(message, state):
+        await _show_truck_selection(message, state, 0)
 
 
 async def _show_list(message: Message, page: int) -> None:
@@ -491,6 +513,7 @@ async def _show_edit_menu(message: Message, state: FSMContext, trip_id: int) -> 
         ("date", "Fecha"),
         ("status", "Estado"),
         ("notes", "Notas"),
+        ("bol_number", "BOL"),
     ]
     rows = []
     current: list = []
@@ -602,6 +625,7 @@ def _apply_edit(trip_id: int, field: str, value) -> Trip | None:
         "date": "trip_date",
         "status": "status",
         "notes": "notes",
+        "bol_number": "bol_number",
         "truck_id": "truck_id",
         "driver_id": "driver_id",
     }
@@ -753,18 +777,32 @@ async def cb_trip_back(callback: CallbackQuery, state: FSMContext) -> None:
         field = data.get("current_field")
         if field == "date":
             await _ask_date(callback.message, state)
-        elif field in CREATE_FIELDS and CREATE_FIELDS.index(field) > 0:
-            await _ask_create_field(
-                callback.message, state, CREATE_FIELDS[CREATE_FIELDS.index(field) - 1]
-            )
-        else:
-            await _show_driver_selection(callback.message, state, 0)
+            return
+        if field in CREATE_FIELDS:
+            index = CREATE_FIELDS.index(field)
+            prefilled = data.get("prefilled", [])
+            previous = None
+            for candidate in reversed(CREATE_FIELDS[:index]):
+                if candidate not in prefilled:
+                    previous = candidate
+                    break
+            if previous is not None:
+                await _ask_create_field(callback.message, state, previous)
+            else:
+                await _show_driver_selection(callback.message, state, 0)
+            return
+        await _show_driver_selection(callback.message, state, 0)
         return
     if current == TripCreate.date.state:
         await _ask_create_field(callback.message, state, "payment")
         return
     if current == TripCreate.status.state:
-        await _ask_date(callback.message, state)
+        data = await state.get_data()
+        prefilled = data.get("prefilled", [])
+        if "trip_date" in prefilled:
+            await _ask_create_field(callback.message, state, "payment")
+        else:
+            await _ask_date(callback.message, state)
         return
     if current == TripCreate.notes.state:
         await _ask_status(callback.message, state)
@@ -863,7 +901,15 @@ async def cb_create_driver_set(
         return
     await callback.answer()
     await state.update_data(driver_id=driver.id, driver_name=driver.name)
-    await _ask_create_field(callback.message, state, "origin")
+    data = await state.get_data()
+    pending = _pending_create_fields(data)
+    if pending:
+        await _ask_create_field(callback.message, state, pending[0])
+        return
+    if data.get("trip_date"):
+        await _ask_status(callback.message, state)
+    else:
+        await _ask_date(callback.message, state)
 
 
 @router.callback_query(TripCB.filter(F.action == "date"))
@@ -926,14 +972,24 @@ async def receive_create_input(message: Message, state: FSMContext) -> None:
 
     key = "trip_date" if field == "date" else field
     await state.update_data({key: value.isoformat() if field == "date" else value})
-    if field == "payment" or field == "date":
-        if field == "date":
+    data = await state.get_data()
+    if field == "date":
+        await _ask_status(message, state)
+        return
+    if field == "payment":
+        if data.get("trip_date"):
             await _ask_status(message, state)
         else:
             await _ask_date(message, state)
         return
-    index = CREATE_FIELDS.index(field)
-    await _ask_create_field(message, state, CREATE_FIELDS[index + 1])
+    pending = _pending_create_fields(data)
+    if pending:
+        await _ask_create_field(message, state, pending[0])
+        return
+    if data.get("trip_date"):
+        await _ask_status(message, state)
+    else:
+        await _ask_date(message, state)
 
 
 @router.message(StateFilter(TripCreate.input))
@@ -1015,6 +1071,7 @@ async def cb_create_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             driver_percentage=Decimal(str(data["percentage"])),
             cargo_payment=Decimal(str(data["payment"])),
             notes=data.get("notes"),
+            bol_number=data.get("bol_number"),
             created_by=callback.from_user.id,
         )
         trip_id = trip.id

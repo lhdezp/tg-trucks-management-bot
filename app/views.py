@@ -78,6 +78,7 @@ def trips_list_view(
         rows.append(nav)
 
     rows.append([button("Nuevo viaje", MenuCB(action="trip_new"))])
+    rows.append([button("Nuevo viaje con BOL", MenuCB(action="trip_new_bol"))])
     rows.append(back_to_menu_row())
 
     if trips:
@@ -96,6 +97,10 @@ def trip_detail_view(trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
         f"Camión: {safe_escape(trip.truck.name)} (#{trip.truck.id})",
         f"Conductor: {safe_escape(trip.driver.name)}",
         f"Ruta: {safe_escape(trip.origin)} → {safe_escape(trip.destination)}",
+    ]
+    if trip.bol_number:
+        lines.append(f"BOL: <code>{safe_escape(trip.bol_number)}</code>")
+    lines += [
         f"Millas: {format_number(trip.distance_miles)}",
         f"Tiempo: {format_duration(trip.duration_minutes)}",
         f"Peso: {format_number(trip.cargo_weight)} {settings.weight_unit}",

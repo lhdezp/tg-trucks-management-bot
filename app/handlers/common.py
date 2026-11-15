@@ -29,6 +29,7 @@ HELP_TEXT = (
     "/menu — Menú principal\n"
     "/viajes — Lista de viajes\n"
     "/nuevoviaje — Registrar un viaje\n"
+    "/nuevobol — Registrar un viaje desde la imagen de un BOL\n"
     "/camiones — Administrar camiones\n"
     "/conductores — Administrar conductores\n"
     "/tickets — Administrar tickets de un viaje\n"

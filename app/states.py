@@ -11,6 +11,12 @@ class TripCreate(StatesGroup):
     confirm = State()
 
 
+class TripBOL(StatesGroup):
+    media = State()
+    input = State()
+    confirm = State()
+
+
 class TripEdit(StatesGroup):
     menu = State()
     input = State()

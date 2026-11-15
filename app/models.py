@@ -89,6 +89,9 @@ class Trip(Base):
         enum_column(TripStatus), default=TripStatus.in_progress, index=True
     )
     trip_date: Mapped[date] = mapped_column(Date, index=True)
+    bol_number: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     origin: Mapped[str] = mapped_column(String(160))
     destination: Mapped[str] = mapped_column(String(160))
     distance_miles: Mapped[Decimal] = mapped_column(Numeric(10, 2))

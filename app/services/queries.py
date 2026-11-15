@@ -197,6 +197,7 @@ def create_trip(
     cargo_payment: Decimal,
     notes: str | None,
     created_by: int,
+    bol_number: str | None = None,
 ) -> Trip:
     trip = Trip(
         truck_id=truck_id,
@@ -212,6 +213,7 @@ def create_trip(
         cargo_payment=cargo_payment,
         notes=notes.strip() if notes else None,
         created_by=created_by,
+        bol_number=bol_number.strip() if bol_number else None,
     )
     db.add(trip)
     db.flush()

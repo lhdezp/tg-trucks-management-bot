@@ -70,6 +70,7 @@ def trips_menu_kb() -> InlineKeyboardMarkup:
     return markup(
         [
             [button("Nuevo viaje", MenuCB(action="trip_new"))],
+            [button("Nuevo viaje con BOL", MenuCB(action="trip_new_bol"))],
             [button("Ver viajes", MenuCB(action="trips_list"))],
             back_to_menu_row(),
         ]

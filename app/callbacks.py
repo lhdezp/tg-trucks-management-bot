@@ -26,6 +26,11 @@ class TripCB(CallbackData, prefix="trip"):
     value: str = ""
 
 
+class BolCB(CallbackData, prefix="bol"):
+    action: str
+    value: str = ""
+
+
 class TicketCB(CallbackData, prefix="ticket"):
     action: str
     trip_id: int = 0

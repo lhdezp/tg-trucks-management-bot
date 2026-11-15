@@ -81,10 +81,33 @@ def _ensure_ticket_columns(engine: Engine) -> None:
             )
 
 
+def _ensure_trip_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "trips" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("trips")}
+    migrations = {
+        "bol_number": "VARCHAR(64)",
+    }
+    missing = {
+        name: definition
+        for name, definition in migrations.items()
+        if name not in existing
+    }
+    if not missing:
+        return
+    with engine.begin() as connection:
+        for name, definition in missing.items():
+            connection.execute(
+                text(f"ALTER TABLE trips ADD COLUMN {name} {definition}")
+            )
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_ticket_columns(engine)
+    _ensure_trip_columns(engine)
     with session_scope() as db:
         if db.get(BotSettings, 1) is None:
             db.add(BotSettings(id=1))

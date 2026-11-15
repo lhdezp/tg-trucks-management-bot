@@ -20,7 +20,8 @@ Solo los IDs incluidos en `ADMIN_IDS` pueden usar el bot.
    separados por comas.
 4. Ajusta `TIMEZONE`, `CURRENCY` y `WEIGHT_UNIT` si hace falta.
 5. Opcional: completa `GEMINI_API_KEY` con una clave de Google AI Studio para
-   leer automaticamente el monto total de cada ticket con Gemini.
+   leer automaticamente el monto total de cada ticket y los datos de un BOL
+   con Gemini.
 
 Las fechas, las semanas y el reporte automatico usan la zona horaria configurada.
 La base de datos SQLite se crea automaticamente en `DB_PATH`.
@@ -43,6 +44,7 @@ atajos:
 | `/menu` | Menu principal |
 | `/viajes` | Lista de viajes |
 | `/nuevoviaje` | Registrar un viaje |
+| `/nuevobol` | Registrar un viaje desde la imagen de un BOL |
 | `/camiones` | Administrar camiones |
 | `/conductores` | Administrar conductores |
 | `/tickets` | Administrar los tickets de un viaje |
@@ -61,6 +63,15 @@ El pago del conductor se calcula como `pago de la carga * porcentaje / 100`.
 
 Un viaje puede estar en curso o finalizado. Se puede editar, cambiar de estado,
 eliminar y adjuntar tickets.
+
+### Registrar desde un BOL
+
+Con `/nuevobol` (o el boton `Nuevo viaje con BOL` en el menu de viajes) se puede
+registrar un viaje automaticamente: envia la imagen del BOL (foto o documento) y
+el bot extrae origen, destino, numero de BOL, fecha, peso en libras y distancia en
+millas. Los datos que falten se piden uno por uno, se confirma lo extraido y se
+puede corregir cualquier campo antes de continuar con camion, conductor, tiempo,
+porcentaje, pago, estado y notas. Requiere `GEMINI_API_KEY`.
 
 ### Tickets
 

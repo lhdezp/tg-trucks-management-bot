@@ -28,6 +28,7 @@ FIELD_LABELS = {
     "notes": "Notas",
     "truck": "Camión",
     "driver": "Conductor",
+    "bol_number": "N° BOL",
 }
 
 

@@ -11,6 +11,7 @@ from aiogram.types import BotCommand, ErrorEvent
 from app.config import get_settings
 from app.database import init_db
 from app.handlers import (
+    bol,
     common,
     drivers,
     reports,
@@ -32,6 +33,7 @@ COMMANDS = [
     BotCommand(command="menu", description="Menú principal"),
     BotCommand(command="viajes", description="Lista de viajes"),
     BotCommand(command="nuevoviaje", description="Registrar un viaje"),
+    BotCommand(command="nuevobol", description="Registrar un viaje desde un BOL"),
     BotCommand(command="camiones", description="Administrar camiones"),
     BotCommand(command="conductores", description="Administrar conductores"),
     BotCommand(command="tickets", description="Administrar tickets"),
@@ -64,6 +66,7 @@ async def main() -> None:
         trucks.router,
         drivers.router,
         trips.router,
+        bol.router,
         tickets.router,
         reports.router,
         settings_rt.router,
