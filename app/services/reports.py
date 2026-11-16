@@ -28,6 +28,16 @@ from app.utils import (
     split_text,
     status_label,
 )
+import asyncio
+import json
+import logging
+from pathlib import Path
+
+from google.auth import jwt
+from google.auth.transport.requests import AuthorizedSession
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 TOTAL_FILL = PatternFill("solid", fgColor="D9E2F3")
@@ -342,6 +352,64 @@ def report_filename(
     )
 
 
+async def _upload_to_drive(
+    file_path: Path,
+    filename: str,
+) -> None:
+    """Sube el archivo a Google Drive usando la cuenta de servicio configurada.
+
+    Best-effort: si falla (sin credenciales, carpeta no compartida, quota,
+    etc.), lanza excepción que será capturada por el caller para no interrumpir
+    el envío por Telegram.
+    """
+    settings = get_settings()
+    sa_file = settings.google_service_account_file
+    folder_id = settings.google_drive_folder_id
+
+    if not sa_file or not sa_file.exists():
+        logging.getLogger(__name__).warning(
+            "No configurado GOOGLE_SERVICE_ACCOUNT_FILE, se omitirá el subido a Drive"
+        )
+        return
+
+    try:
+        sa_credentials = json.loads(sa_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "Error leyendo archivo de credenciales de Drive: %s", exc
+        )
+        return
+
+    try:
+        # Crear credenciales desde el JSON de la cuenta de servicio
+        credentials = service_account.Credentials.from_service_account_info(
+            sa_credentials,
+            scopes=["https://www.googleapis.com/auth/drive"],
+        )
+        service = build("drive", "v3", credentials=credentials)
+
+        file_metadata: dict = {
+            "name": filename,
+        }
+        if folder_id:
+            file_metadata["parents"] = [folder_id]
+
+        media = MediaFileUpload(str(file_path), resumable=True)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields="id",
+        ).execute()
+
+        logging.getLogger(__name__).info(
+            "Reporte subido a Drive, ID: %s", file.get("id")
+        )
+    except Exception as exc:
+        logging.getLogger(__name__).error(
+            "Error subiendo reporte a Drive: %s", exc
+        )
+
+
 async def send_report(
     bot: Bot,
     chat_id: int,
@@ -373,6 +441,8 @@ async def send_report(
         week_start, week_end, general=general, truck_id=truck_id
     )
     try:
+        # Subir a Google Drive (best-effort; si falla, el reporte sigue por Telegram)
+        await _upload_to_drive(path, filename)
         await bot.send_document(
             chat_id=chat_id,
             document=FSInputFile(path, filename=filename),

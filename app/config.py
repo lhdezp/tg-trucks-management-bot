@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_timeout_seconds: float = 20.0
+    google_service_account_file: Path | None = None
+    google_drive_folder_id: str | None = None
 
     @field_validator("gemini_api_key", mode="before")
     @classmethod
