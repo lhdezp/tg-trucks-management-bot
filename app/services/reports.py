@@ -28,14 +28,10 @@ from app.utils import (
     split_text,
     status_label,
 )
-import asyncio
-import json
 import logging
-from pathlib import Path
 
-from google.auth import jwt
-from google.auth.transport.requests import AuthorizedSession
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -352,45 +348,67 @@ def report_filename(
     )
 
 
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+
+
+def _drive_credentials(settings: Settings) -> Credentials | None:
+    """Construye credenciales OAuth2 de usuario para Google Drive.
+
+    Devuelve ``None`` si la configuración OAuth está incompleta.
+    """
+    client_id = settings.google_oauth_client_id
+    client_secret = settings.google_oauth_client_secret
+    refresh_token = settings.google_oauth_refresh_token
+    if not (client_id and client_secret and refresh_token):
+        return None
+
+    credentials = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=[DRIVE_SCOPE],
+    )
+    credentials.refresh(Request())
+    return credentials
+
+
 async def _upload_to_drive(
     file_path: Path,
     filename: str,
 ) -> None:
-    """Sube el archivo a Google Drive usando la cuenta de servicio configurada.
+    """Sube el archivo a Google Drive con las credenciales OAuth2 del usuario.
 
     Best-effort: si falla (sin credenciales, carpeta no compartida, quota,
-    etc.), lanza excepción que será capturada por el caller para no interrumpir
-    el envío por Telegram.
+    etc.), se registra el error y no se interrumpe el envío por Telegram.
     """
+    logger = logging.getLogger(__name__)
     settings = get_settings()
-    sa_file = settings.google_service_account_file
     folder_id = settings.google_drive_folder_id
 
-    if not sa_file or not sa_file.exists():
-        logging.getLogger(__name__).warning(
-            "No configurado GOOGLE_SERVICE_ACCOUNT_FILE, se omitirá el subido a Drive"
-        )
-        return
-
     try:
-        sa_credentials = json.loads(sa_file.read_text(encoding="utf-8"))
+        credentials = _drive_credentials(settings)
     except Exception as exc:
-        logging.getLogger(__name__).error(
-            "Error leyendo archivo de credenciales de Drive: %s", exc
+        logger.error("No se pudo autenticar con Google Drive (OAuth2): %s", exc)
+        return
+
+    if credentials is None:
+        logger.warning(
+            "Google Drive no configurado (faltan GOOGLE_OAUTH_CLIENT_ID, "
+            "GOOGLE_OAUTH_CLIENT_SECRET o GOOGLE_OAUTH_REFRESH_TOKEN); "
+            "se omite la subida"
         )
         return
 
-    try:
-        # Crear credenciales desde el JSON de la cuenta de servicio
-        credentials = service_account.Credentials.from_service_account_info(
-            sa_credentials,
-            scopes=["https://www.googleapis.com/auth/drive"],
-        )
-        service = build("drive", "v3", credentials=credentials)
+    if not folder_id:
+        logger.warning("Falta GOOGLE_DRIVE_FOLDER_ID; se sube sin carpeta destino")
 
-        file_metadata: dict = {
-            "name": filename,
-        }
+    try:
+        service = build(
+            "drive", "v3", credentials=credentials, cache_discovery=False
+        )
+        file_metadata: dict = {"name": filename}
         if folder_id:
             file_metadata["parents"] = [folder_id]
 
@@ -399,15 +417,12 @@ async def _upload_to_drive(
             body=file_metadata,
             media_body=media,
             fields="id",
+            supportsAllDrives=True,
         ).execute()
 
-        logging.getLogger(__name__).info(
-            "Reporte subido a Drive, ID: %s", file.get("id")
-        )
+        logger.info("Reporte subido a Drive, ID: %s", file.get("id"))
     except Exception as exc:
-        logging.getLogger(__name__).error(
-            "Error subiendo reporte a Drive: %s", exc
-        )
+        logger.error("Error subiendo reporte a Drive: %s", exc)
 
 
 async def send_report(

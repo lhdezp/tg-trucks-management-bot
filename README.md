@@ -22,6 +22,9 @@ Solo los IDs incluidos en `ADMIN_IDS` pueden usar el bot.
 5. Opcional: completa `GEMINI_API_KEY` con una clave de Google AI Studio para
    leer automaticamente el monto total de cada ticket y los datos de un BOL
    con Gemini.
+6. Opcional: para subir los reportes a Google Drive, completa las variables
+   `GOOGLE_OAUTH_*` y `GOOGLE_DRIVE_FOLDER_ID`. Ver la guia de credenciales en
+   [`docs/guia-credenciales-google-drive.md`](docs/guia-credenciales-google-drive.md).
 
 Las fechas, las semanas y el reporte automatico usan la zona horaria configurada.
 La base de datos SQLite se crea automaticamente en `DB_PATH`.
@@ -103,3 +106,14 @@ En `/configuracion` se puede cambiar el dia, la hora, el alcance, el destino y e
 estado del reporte automatico. Por defecto se envia los domingos a las 09:00 al
 chat configurado o, si no hay uno, a los administradores como respaldo. Si el bot
 estuvo apagado a la hora programada, no se envia un reporte atrasado.
+
+### Google Drive
+
+Si estan configuradas las credenciales OAuth2 (`GOOGLE_OAUTH_CLIENT_ID`,
+`GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`) y el
+`GOOGLE_DRIVE_FOLDER_ID`, cada reporte Excel se sube a esa carpeta de Google
+Drive ademas de enviarse al chat. La subida es best-effort: si falla, el reporte
+igual se envia por Telegram.
+
+Guia paso a paso para obtener las credenciales, pensada para usuarios no
+tecnicos: [`docs/guia-credenciales-google-drive.md`](docs/guia-credenciales-google-drive.md).

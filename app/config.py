@@ -25,12 +25,26 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_timeout_seconds: float = 20.0
-    google_service_account_file: Path | None = None
     google_drive_folder_id: str | None = None
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_refresh_token: str | None = None
 
     @field_validator("gemini_api_key", mode="before")
     @classmethod
     def validate_gemini_api_key(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator(
+        "google_oauth_client_id",
+        "google_oauth_client_secret",
+        "google_oauth_refresh_token",
+        mode="before",
+    )
+    @classmethod
+    def validate_oauth_empty(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
             return None
         return value
