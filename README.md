@@ -24,7 +24,6 @@ Solo los IDs incluidos en `ADMIN_IDS` pueden usar el bot.
    con Gemini.
 6. Opcional: para subir los reportes a Google Drive, completa las variables
    `GOOGLE_OAUTH_*` y `GOOGLE_DRIVE_FOLDER_ID`. Ver la guia de credenciales en
-   [`docs/guia-credenciales-google-drive.md`](docs/guia-credenciales-google-drive.md).
 
 Las fechas, las semanas y el reporte automatico usan la zona horaria configurada.
 La base de datos SQLite se crea automaticamente en `DB_PATH`.
@@ -115,5 +114,3 @@ Si estan configuradas las credenciales OAuth2 (`GOOGLE_OAUTH_CLIENT_ID`,
 Drive ademas de enviarse al chat. La subida es best-effort: si falla, el reporte
 igual se envia por Telegram.
 
-Guia paso a paso para obtener las credenciales, pensada para usuarios no
-tecnicos: [`docs/guia-credenciales-google-drive.md`](docs/guia-credenciales-google-drive.md).
